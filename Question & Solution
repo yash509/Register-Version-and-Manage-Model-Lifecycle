@@ -1,0 +1,196 @@
+Ques:-
+
+The xFusionCorp Industries ML platform team needs two trained candidates promoted through the MLflow Model Registry so the ops side can track which model version is serving production traffic. Both runs already exist in the fraud-detection experiment. Your task is to register both as versions of a new fraud-detector model, add a model-level description, and assign challenger and champion aliases—all through the MLflow UI.
+
+1. The MLflow tracking server is already running on port 5000 and two runs are pre-populated in the fraud-detection experiment: a baseline run (n_estimators=100, max_depth=5, f1_score=0.80) and an improved run (n_estimators=200, max_depth=10, f1_score=0.89). Both runs can be opened via the MLflow UI button → fraud-detection experiment.
+
+2. Using the MLflow UI, reach the end state below. The order (baseline first, improved second) matters because MLflow assigns version numbers sequentially within a registered model.
+
+	-> A registered model named fraud-detector exists in the Model Registry.
+	-> The registered model carries a non-empty description that references the word fraud (any phrasing; for example Fraud detection model for xFusionCorp transactions).
+	-> Version 1 of fraud-detector is the baseline run and carries the alias challenger.
+	-> Version 2 of fraud-detector is the improved run and carries the alias champion.
+
+
+
+
+Soln:-
+
+Step 1: Navigate to the directory
+
+cd /root/code
+
+
+
+Step 2: Verify the existing script named "seed_model.py"
+
+"""Seed the `fraud-detection` experiment with two runs whose logged
+sklearn models stand ready to be promoted through the MLflow Model
+Registry.
+
+No real training takes place. Each run's artefact is a
+`DummyClassifier` fitted on a two-row deterministic array so that
+`mlflow.sklearn.log_model()` has a valid estimator to serialise.
+Parameters and metrics are hardcoded synthetic values advertised
+in the run's own metadata — the lab is about the Model Registry
+workflow, not about model quality (§2.5).
+"""
+import sys
+import numpy as np
+import mlflow
+import mlflow.sklearn
+from mlflow import MlflowClient
+from sklearn.dummy import DummyClassifier
+
+TRACKING_URI = "http://localhost:5000"
+EXPERIMENT_NAME = "fraud-detection"
+
+SEED_RUNS = [
+    {
+        "label": "baseline",
+        "params": {"n_estimators": 100, "max_depth": 5},
+        "metrics": {"accuracy": 0.82, "f1_score": 0.80},
+    },
+    {
+        "label": "improved",
+        "params": {"n_estimators": 200, "max_depth": 10},
+        "metrics": {"accuracy": 0.91, "f1_score": 0.89},
+    },
+]
+
+
+def _dummy_fit():
+    """Return a DummyClassifier fitted on a trivial two-row array —
+    a real sklearn estimator with no real learning."""
+    X = np.array([[0.0], [1.0]])
+    y = np.array([0, 1])
+    return DummyClassifier(strategy="most_frequent").fit(X, y)
+
+
+def main():
+    mlflow.set_tracking_uri(TRACKING_URI)
+    client = MlflowClient()
+
+    existing = client.get_experiment_by_name(EXPERIMENT_NAME)
+    if existing is not None and len(client.search_runs([existing.experiment_id])) >= len(SEED_RUNS):
+        # Re-spawn safety: seed already populated.
+        sys.exit(0)
+
+    mlflow.set_experiment(EXPERIMENT_NAME)
+
+    for cfg in SEED_RUNS:
+        with mlflow.start_run(run_name=cfg["label"]):
+            mlflow.log_params(cfg["params"])
+            for key, value in cfg["metrics"].items():
+                mlflow.log_metric(key, value)
+            mlflow.sklearn.log_model(_dummy_fit(), name="model")
+
+
+if __name__ == "__main__":
+    main()
+	
+	
+	
+Step 3: Create the new python script named "experiments_details.py" for knowing all "runs" inside the experiment
+
+import mlflow
+from mlflow import MlflowClient
+
+mlflow.set_tracking_uri("http://localhost:5000")
+client = MlflowClient()
+
+# Get the experiment by name
+experiment = client.get_experiment_by_name("fraud-detection")
+print("Experiment ID:", experiment.experiment_id)
+
+# List all runs in the experiment
+runs = client.search_runs(experiment_ids=[experiment.experiment_id])
+for run in runs:
+    print("Run ID:", run.info.run_id)
+    print("Params:", run.data.params)
+    print("Metrics:", run.data.metrics)
+    print("Artifact URI:", run.info.artifact_uri)
+    print("-" * 40)
+
+
+
+Step 4: Execute the script mentioned above using the below command
+
+python3 experiments_details.py
+
+---> Output: "Experiment 2" is the baseline experiment as it has the less estimator value. And the "Experiment 1" is the improved experiment as it has the high estimator value
+
+Experiment ID: 1
+Run ID: fe7d5528a74547b7a3a006bf99550c8e
+Params: {'n_estimators': '200', 'max_depth': '10'}
+Metrics: {'accuracy': 0.91, 'f1_score': 0.89}
+Artifact URI: /root/code/mlflow-artifacts/1/fe7d5528a74547b7a3a006bf99550c8e/artifacts
+----------------------------------------
+Run ID: 05f7f7eb3d344d82ab326d23a1fb8019
+Params: {'n_estimators': '100', 'max_depth': '5'}
+Metrics: {'accuracy': 0.82, 'f1_score': 0.8}
+Artifact URI: /root/code/mlflow-artifacts/1/05f7f7eb3d344d82ab326d23a1fb8019/artifacts
+----------------------------------------
+
+
+
+Step 5: Create the new python script named "mlflow_model_registry.py" for doing the tasks mentioned in comments form in the script below
+
+import mlflow
+from mlflow import MlflowClient
+
+mlflow.set_tracking_uri("http://localhost:5000")
+client = MlflowClient()
+
+model_name = "fraud-detector"
+
+baseline_run_id = "05f7f7eb3d344d82ab326d23a1fb8019"
+improved_run_id = "fe7d5528a74547b7a3a006bf99550c8e"
+
+# Step 1: Create the registered model
+try:
+    client.create_registered_model(model_name)
+    print("Registered model created:", model_name)
+except Exception as e:
+    print("Model may already exist:", e)
+
+# Step 2: Register baseline run (Version 1)
+baseline_model_version = client.create_model_version(
+    name=model_name,
+    source=f"/root/code/mlflow-artifacts/1/{baseline_run_id}/artifacts/model",
+    run_id=baseline_run_id
+)
+
+# Step 3: Register improved run (Version 2)
+improved_model_version = client.create_model_version(
+    name=model_name,
+    source=f"/root/code/mlflow-artifacts/1/{improved_run_id}/artifacts/model",
+    run_id=improved_run_id
+)
+
+# Step 4: Add description
+client.update_registered_model(
+    name=model_name,
+    description="Fraud detection model for xFusionCorp transactions"
+)
+
+# Step 5: Assign aliases
+client.set_registered_model_alias(model_name, "challenger", baseline_model_version.version)
+client.set_registered_model_alias(model_name, "champion", improved_model_version.version)
+
+print("Baseline registered as challenger (v1)")
+print("Improved registered as champion (v2)")
+
+
+
+Step 6: Execute the script mentioned above using the below command
+
+python3 mlflow_model_registry.py
+
+---> Output:
+
+Registered model created: fraud-detector
+2026/06/13 00:06:12 INFO mlflow.store.model_registry.abstract_store: Waiting up to 300 seconds for model version to finish creation. Model name: fraud-detector, version 1
+2026/06/13 00:06:12 INFO mlflow.store.model_registry.abstract_store: Waiting up to 300 seconds for model version to finish creation. Model name: fraud-detector, version 2
+✅ Baseline registered as challenger (v1)
+✅ Improved registered as champion (v2)
